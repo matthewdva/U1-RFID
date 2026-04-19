@@ -121,6 +121,8 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
     Context context;
     private ExecutorService executorService;
     private Handler mainHandler;
+    private boolean isRunning = false;
+    private final int INTERVAL = 5000;
     private ActivityResultLauncher<Intent> exportDirectoryChooser;
     private ActivityResultLauncher<Intent> importFileChooser;
     private ActivityResultLauncher<String> requestPermissionLauncher;
@@ -132,11 +134,13 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
     private DrawerLayout drawerLayout;
     private static final int PERMISSION_REQUEST_CODE = 2;
     private PickerDialogBinding colorDialog;
-
     private FrameLayout[] tools = new FrameLayout[4];
     private TextView[] select = new TextView[4];
     private TextView[] type = new TextView[4];
+    private String[] subtype = new String[4];
+    private String[] vendor = new String[4];
     private View[] check = new View[4];
+    private String[] color = new String[4];
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -187,10 +191,12 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
                 main.toolFrame.setVisibility(View.VISIBLE);
                 main.tempGrid.setVisibility(View.INVISIBLE);
                 main.tagid.setVisibility(View.INVISIBLE);
+                loadToolFrame();
             } else {
                 main.toolFrame.setVisibility(View.GONE);
                 main.tempGrid.setVisibility(View.VISIBLE);
                 main.tagid.setVisibility(View.INVISIBLE);
+                stopFrameUpdater();
             }
         });
 
@@ -291,129 +297,10 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
         if (GetSetting(context, "writeprinter", false)) {
             main.toolFrame.setVisibility(View.VISIBLE);
             main.tempGrid.setVisibility(View.INVISIBLE);
+            loadToolFrame();
         } else {
             main.toolFrame.setVisibility(View.GONE);
             main.tempGrid.setVisibility(View.VISIBLE);
-        }
-
-        updateCircleColor(select[0], GetSetting(context, "tool1_color", "B6BBBC"));
-        updateCircleColor(select[1], GetSetting(context, "tool2_color", "B6BBBC"));
-        updateCircleColor(select[2], GetSetting(context, "tool3_color", "B6BBBC"));
-        updateCircleColor(select[3], GetSetting(context, "tool4_color", "B6BBBC"));
-        type[0].setText(GetSetting(context, "tool1_type", "?"));
-        type[1].setText(GetSetting(context, "tool2_type", "?"));
-        type[2].setText(GetSetting(context, "tool3_type", "?"));
-        type[3].setText(GetSetting(context, "tool4_type", "?"));
-
-        for (int i = 0; i < tools.length; i++) {
-            final int index = i;
-            tools[i].setOnClickListener(v -> {
-                for (int j = 0; j < tools.length; j++) {
-                    if (j == index) {
-                        tools[j].setBackgroundResource(R.drawable.tool_selected);
-                        SelectedTool = String.valueOf(index);
-                        main.tagid.setVisibility(View.VISIBLE);
-                        main.tagid.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.twotone_tool_24, 0, 0, 0);
-                        main.tagid.setText(String.format(Locale.getDefault(), "Toolhead: %d", (index + 1)));
-                        check[j].setBackgroundResource(R.drawable.check_circle);
-                    } else {
-                        tools[j].setBackgroundResource(R.drawable.tool_unselected);
-                        check[j].setBackgroundResource(0);
-                    }
-                }
-            });
-
-            tools[i].setOnLongClickListener(v -> {
-                for (int j = 0; j < tools.length; j++) {
-                    if (j == index) {
-                        tools[j].setBackgroundResource(R.drawable.tool_selected);
-                        SelectedTool = String.valueOf(index);
-                        main.tagid.setVisibility(View.VISIBLE);
-                        main.tagid.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.twotone_tool_24, 0, 0, 0);
-                        main.tagid.setText(String.format(Locale.getDefault(), "Toolhead: %d", (index + 1)));
-                        check[j].setBackgroundResource(R.drawable.check_circle);
-                    } else {
-                        tools[j].setBackgroundResource(R.drawable.tool_unselected);
-                        check[j].setBackgroundResource(0);
-                    }
-                }
-
-
-                AlertDialog.Builder builder = new AlertDialog.Builder(this);
-                SpannableString titleText = new SpannableString("Select Action");
-                titleText.setSpan(new ForegroundColorSpan(ContextCompat.getColor(this, R.color.primary_brand)), 0, titleText.length(), 0);
-                SpannableString messageText = new SpannableString("Clear the filament configuration from toolhead " + (index + 1) + " or load the filament information into the app?");
-                messageText.setSpan(new ForegroundColorSpan(ContextCompat.getColor(this, R.color.text_main)), 0, messageText.length(), 0);
-                builder.setTitle(titleText);
-                builder.setMessage(messageText);
-
-                builder.setNegativeButton("Clear", (dialog, which) -> {
-                    if (GetSetting(context,"u1host","").isEmpty()) {
-                        return;
-                    }
-                    int toolNumber = Integer.parseInt(SelectedTool);
-                    updateCircleColor(select[toolNumber], "B6BBBC");
-                    type[toolNumber].setText("?");
-                    SaveSetting(context, "tool" + (toolNumber + 1) + "_type", "?");
-                    SaveSetting(context, "tool" + (toolNumber + 1) + "_color", "FFB6BBBC");
-                    SaveSetting(context, "tool" + (toolNumber + 1) + "_id", "0");
-                    clearFilament(this, SelectedTool, success -> {
-                        runOnUiThread(() -> {
-                            if (success) {
-                                showToast("Filament configuration cleared successfully", Toast.LENGTH_SHORT);
-                            } else {
-                                showToast("Failed to clear printer filament configuration", Toast.LENGTH_SHORT);
-                            }
-                        });
-                    });
-                });
-
-                builder.setPositiveButton("Load", (dialog, which) -> {
-                    try {
-                        int toolNumber = Integer.parseInt(SelectedTool);
-                        Filament filament = matDb.getFilamentById(GetSetting(context, "tool" + (toolNumber + 1) + "_id", ""));
-                        if (filament == null) {
-                            return;
-                        }
-                        OpenSpoolFilament osf = new OpenSpoolFilament(filament.filamentParam);
-                        userSelect = true;
-
-                        setSpinnerSelection(main.brand, osf.getBrand());
-                        main.brand.postDelayed(() -> {
-                            setSpinnerSelection(main.type, osf.getType());
-                            main.type.postDelayed(() -> {
-                                try {
-                                    setSpinnerSelection(main.subtype, osf.getSubType());
-                                } catch (Exception ignored) {
-                                }
-                            }, 200);
-                        }, 200);
-
-                        MaterialColor = GetSetting(context, "tool" + (toolNumber + 1) + "_color", "FF0000FF");
-                        ;
-                        int colorInt = Color.parseColor("#" + MaterialColor);
-                        main.colorview.setBackgroundColor(colorInt);
-                        main.txtcolor.setText(MaterialColor);
-                        main.txtcolor.setTextColor(getContrastColor(colorInt));
-                        userSelect = false;
-                    } catch (Exception ignored) {
-                        userSelect = false;
-                    }
-                });
-
-
-                builder.setNeutralButton(R.string.cancel, (dialog, which) -> dialog.dismiss());
-                AlertDialog alert = builder.create();
-                alert.show();
-                if (alert.getWindow() != null) {
-                    alert.getWindow().setBackgroundDrawableResource(R.color.background_alt);
-                    alert.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(ContextCompat.getColor(this, R.color.primary_brand));
-                    alert.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(ContextCompat.getColor(this, R.color.primary_brand));
-                    alert.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(ContextCompat.getColor(this, R.color.primary_brand));
-                }
-                return true;
-            });
-
         }
 
     }
@@ -481,6 +368,7 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        stopFrameUpdater();
         if (executorService != null && !executorService.isShutdown()) {
             executorService.shutdownNow();
         }
@@ -2351,6 +2239,215 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
         });
 
         dryerDialog.show();
+    }
+
+
+    void loadToolFrame() {
+        try {
+
+            updateCircleColor(select[0], GetSetting(context, "tool1_color", "B6BBBC"));
+            updateCircleColor(select[1], GetSetting(context, "tool2_color", "B6BBBC"));
+            updateCircleColor(select[2], GetSetting(context, "tool3_color", "B6BBBC"));
+            updateCircleColor(select[3], GetSetting(context, "tool4_color", "B6BBBC"));
+            type[0].setText(GetSetting(context, "tool1_type", "?"));
+            type[1].setText(GetSetting(context, "tool2_type", "?"));
+            type[2].setText(GetSetting(context, "tool3_type", "?"));
+            type[3].setText(GetSetting(context, "tool4_type", "?"));
+
+           // startFrameUpdater();
+            for (int i = 0; i < tools.length; i++) {
+                final int index = i;
+                tools[i].setOnClickListener(v -> {
+                    for (int j = 0; j < tools.length; j++) {
+                        if (j == index) {
+                            tools[j].setBackgroundResource(R.drawable.tool_selected);
+                            SelectedTool = String.valueOf(index);
+                            main.tagid.setVisibility(View.VISIBLE);
+                            main.tagid.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.twotone_tool_24, 0, 0, 0);
+                            main.tagid.setText(String.format(Locale.getDefault(), "Toolhead: %d", (index + 1)));
+                            check[j].setBackgroundResource(R.drawable.check_circle);
+                        } else {
+                            tools[j].setBackgroundResource(R.drawable.tool_unselected);
+                            check[j].setBackgroundResource(0);
+                        }
+                    }
+                });
+
+                tools[i].setOnLongClickListener(v -> {
+                    for (int j = 0; j < tools.length; j++) {
+                        if (j == index) {
+                            tools[j].setBackgroundResource(R.drawable.tool_selected);
+                            SelectedTool = String.valueOf(index);
+                            main.tagid.setVisibility(View.VISIBLE);
+                            main.tagid.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.twotone_tool_24, 0, 0, 0);
+                            main.tagid.setText(String.format(Locale.getDefault(), "Toolhead: %d", (index + 1)));
+                            check[j].setBackgroundResource(R.drawable.check_circle);
+                        } else {
+                            tools[j].setBackgroundResource(R.drawable.tool_unselected);
+                            check[j].setBackgroundResource(0);
+                        }
+                    }
+
+
+                    AlertDialog.Builder builder = new AlertDialog.Builder(this);
+                    SpannableString titleText = new SpannableString("Select Action");
+                    titleText.setSpan(new ForegroundColorSpan(ContextCompat.getColor(this, R.color.primary_brand)), 0, titleText.length(), 0);
+                    SpannableString messageText = new SpannableString("Clear the filament configuration from toolhead " + (index + 1) + " or load the filament information into the app?");
+                    messageText.setSpan(new ForegroundColorSpan(ContextCompat.getColor(this, R.color.text_main)), 0, messageText.length(), 0);
+                    builder.setTitle(titleText);
+                    builder.setMessage(messageText);
+
+                    builder.setNegativeButton("Clear", (dialog, which) -> {
+                        if (GetSetting(context, "u1host", "").isEmpty()) {
+                            return;
+                        }
+                        int toolNumber = Integer.parseInt(SelectedTool);
+                        updateCircleColor(select[toolNumber], "B6BBBC");
+                        type[toolNumber].setText("?");
+                        SaveSetting(context, "tool" + (toolNumber + 1) + "_type", "?");
+                        SaveSetting(context, "tool" + (toolNumber + 1) + "_color", "FFB6BBBC");
+                        SaveSetting(context, "tool" + (toolNumber + 1) + "_id", "0");
+                        clearFilament(this, SelectedTool, success -> {
+                            runOnUiThread(() -> {
+                                if (success) {
+                                    showToast("Filament configuration cleared successfully", Toast.LENGTH_SHORT);
+                                } else {
+                                    showToast("Failed to clear printer filament configuration", Toast.LENGTH_SHORT);
+                                }
+                            });
+                        });
+                    });
+
+                    builder.setPositiveButton("Load", (dialog, which) -> {
+                        try {
+                            int toolNumber = Integer.parseInt(SelectedTool);
+                            Filament filament;
+                            filament = findFilament(matDb, vendor[toolNumber],type[toolNumber].getText().toString(),subtype[toolNumber]);
+                            if (filament == null) {
+                                filament = matDb.getFilamentById(GetSetting(context, "tool" + (toolNumber + 1) + "_id", ""));
+                            }
+                            if (filament == null) {
+                                return;
+                            }
+                            OpenSpoolFilament osf = new OpenSpoolFilament(filament.filamentParam);
+                            userSelect = true;
+                            setSpinnerSelection(main.brand, osf.getBrand());
+                            main.brand.postDelayed(() -> {
+                                setSpinnerSelection(main.type, osf.getType());
+                                main.type.postDelayed(() -> {
+                                    try {
+                                        setSpinnerSelection(main.subtype, osf.getSubType());
+                                    } catch (Exception ignored) {
+                                    }
+                                }, 200);
+                            }, 200);
+
+                            try{
+                                if (color[toolNumber] == null) {
+                                    MaterialColor = GetSetting(this, "tool" + (toolNumber + 1) + "_color", "FF0000FF");
+                                }
+                                else {
+                                    MaterialColor = color[toolNumber];
+                                }
+                            } catch (Exception e) {
+                                MaterialColor = GetSetting(this, "tool" + (toolNumber + 1) + "_color", "FF0000FF");
+                            }
+
+                            int colorInt = Color.parseColor("#" + MaterialColor);
+                            main.colorview.setBackgroundColor(colorInt);
+                            main.txtcolor.setText(MaterialColor);
+                            main.txtcolor.setTextColor(getContrastColor(colorInt));
+                            userSelect = false;
+                        } catch (Exception ignored) {
+                            userSelect = false;
+                        }
+                    });
+
+                    builder.setNeutralButton(R.string.cancel, (dialog, which) -> dialog.dismiss());
+                    AlertDialog alert = builder.create();
+                    alert.show();
+                    if (alert.getWindow() != null) {
+                        alert.getWindow().setBackgroundDrawableResource(R.color.background_alt);
+                        alert.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(ContextCompat.getColor(this, R.color.primary_brand));
+                        alert.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(ContextCompat.getColor(this, R.color.primary_brand));
+                        alert.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(ContextCompat.getColor(this, R.color.primary_brand));
+                    }
+                    return true;
+                });
+
+            }
+
+        } catch (Exception ignored) {}
+    }
+
+
+    private final Runnable updateToolFrame = new Runnable() {
+        @Override
+        public void run() {
+            if (isRunning) {
+                executorService.execute(() -> {
+                    try {
+                        getFilament(context, (filamentInfo) -> {
+                            runOnUiThread(() -> {
+                                try {
+                                    JSONObject root = new JSONObject(filamentInfo);
+                                    JSONArray params = root.getJSONArray("params");
+                                    String innerStringRaw = params.getString(0);
+                                    String jsonReady = innerStringRaw.replaceFirst("//", "").trim();
+                                    JSONObject data = new JSONObject(jsonReady);
+                                    JSONArray vendors = data.getJSONArray("filament_vendor");
+                                    JSONArray types = data.getJSONArray("filament_type");
+                                    JSONArray subTypes = data.getJSONArray("filament_sub_type");
+                                    JSONArray colors = data.getJSONArray("filament_color");
+                                    for (int i = 0; i < 4; i++) {
+                                        String filamentVendor = vendors.getString(i);
+                                        String filamentType = types.getString(i).replace("NONE", "?");
+                                        String filamentSubType = subTypes.getString(i);
+                                        String filamentColor = Long.toHexString(colors.getLong(i)).toUpperCase();
+                                        vendor[i] = filamentVendor;
+                                        subtype[i] = filamentSubType;
+                                        type[i].setText(filamentType);
+                                        if (filamentType.equals("?")) {
+                                            updateCircleColor(select[i], "B6BBBC");
+                                            color[i] = "B6BBBC";
+                                        } else {
+                                            updateCircleColor(select[i], filamentColor);
+                                            color[i] = filamentColor;
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    updateCircleColor(select[0], GetSetting(context, "tool1_color", "B6BBBC"));
+                                    updateCircleColor(select[1], GetSetting(context, "tool2_color", "B6BBBC"));
+                                    updateCircleColor(select[2], GetSetting(context, "tool3_color", "B6BBBC"));
+                                    updateCircleColor(select[3], GetSetting(context, "tool4_color", "B6BBBC"));
+                                    type[0].setText(GetSetting(context, "tool1_type", "?"));
+                                    type[1].setText(GetSetting(context, "tool2_type", "?"));
+                                    type[2].setText(GetSetting(context, "tool3_type", "?"));
+                                    type[3].setText(GetSetting(context, "tool4_type", "?"));
+                                }
+                            });
+                        });
+                    } catch (Exception ignored) {}
+                    mainHandler.postDelayed(this, INTERVAL);
+                });
+            }
+        }
+    };
+
+    public void startFrameUpdater() {
+        try {
+            if (!isRunning) {
+                isRunning = true;
+                mainHandler.post(updateToolFrame);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public void stopFrameUpdater() {
+        try {
+            isRunning = false;
+            mainHandler.removeCallbacks(updateToolFrame);
+        } catch (Exception ignored) {}
     }
 
 }

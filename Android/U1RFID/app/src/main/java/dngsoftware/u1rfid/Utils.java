@@ -16,6 +16,7 @@ import android.net.Uri;
 import android.nfc.tech.NfcA;
 import android.text.InputFilter;
 import android.text.Spanned;
+import android.util.Log;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
@@ -231,6 +232,26 @@ public class Utils {
                 db.addItem(dbItem);
             }
         } catch (Exception ignored) {}
+    }
+
+    public static Filament findFilament(MatDB db, String targetVendor, String targetType, String targetSubtype) {
+        List<Filament> allFilaments = db.getAllItems();
+        for (Filament filament : allFilaments) {
+            try {
+                JSONObject paramJson = new JSONObject(filament.filamentParam);
+                String dbBrand = paramJson.optString("brand");
+                String dbType = paramJson.optString("type");
+                String dbSubtype = paramJson.optString("subtype");
+                if (dbSubtype.isEmpty()) dbSubtype = "Basic";
+                if (targetSubtype.isEmpty()) targetSubtype = "Basic";
+                if (dbBrand.equalsIgnoreCase(targetVendor) &&
+                        dbType.equalsIgnoreCase(targetType) &&
+                        dbSubtype.equalsIgnoreCase(targetSubtype)) {
+                    return filament;
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     private static void addToList(List<OpenSpoolFilament> list, String brand, String type, String sub, int minE, int maxE, int minB, int maxB) {
@@ -782,6 +803,19 @@ public class Utils {
         }).start();
     }
 
+    public static void getFilament(Context context, MacroWsCallback callback) {
+        new Thread(() -> {
+            String ret = null;
+
+            try {
+                String command = "GET_PRINT_TASK_CONFIG";
+                ret = sendMacroCommandWs(context, command);
+            } catch (Exception ignored) {}
+            if (callback != null) {
+                callback.onResult(ret);
+            }
+        }).start();
+    }
 
     public static void getToolSensor(Context context, String extruder, MacroWsCallback callback) {
         new Thread(() -> {
@@ -870,7 +904,7 @@ public class Utils {
         });
 
         try {
-            boolean success = latch.await(5, TimeUnit.SECONDS);
+            boolean success = latch.await(3, TimeUnit.SECONDS);
             if (!success) return "Timeout Error";
         } catch (InterruptedException e) {
             return "Interrupted Error";
