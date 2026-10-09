@@ -2442,12 +2442,24 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
         return colourHex.length() >= 8 ? colourHex.substring(6, 8) : fallback;
     }
 
+    // A filament has either one colour or a list of them, never both; the list's first is
+    // the one that stands for it.
+    private static String spoolmanColourHex(JSONObject filament) {
+        String single = filament.optString("color_hex", "").replace("#", "").trim();
+        if (!single.isEmpty()) return single;
+        for (String part : filament.optString("multi_color_hexes", "").split(",")) {
+            String hex = part.replace("#", "").trim();
+            if (!hex.isEmpty()) return hex;
+        }
+        return "";
+    }
+
     // The colour to write: Spoolman's, when one of its filaments matched. It holds the
     // product's own shade, 2240AF for Elegoo's blue, where this app holds what was picked.
     String effectiveColour() {
         JSONObject f = cachedSmFilament;
         if (f == null || MaterialColor.length() < 8) return MaterialColor;
-        String theirs = f.optString("color_hex", "").replace("#", "");
+        String theirs = spoolmanColourHex(f);
         String rgb = spoolmanRgb(theirs);
         if (rgb.isEmpty()) return MaterialColor;
         return spoolmanAlpha(theirs, MaterialColor.substring(0, 2)) + rgb;
@@ -2634,18 +2646,18 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
             }
 
             OpenSpoolFilament osf = new OpenSpoolFilament(local.filamentParam);
-            MaterialID = local.filamentID;
-            pinnedForMaterialId = MaterialID;
-            pinnedSmFilamentId = filament.optInt("id");
-            spoolmanFilamentIds.put(MaterialID, filament.optInt("id"));
-            cachedFilamentKey = "";
-            cachedSmFilament = filament;
-            cachedSmSpool = spool;
+            settleSpoolmanSpool(local, spool);
 
             setSpinnerSelection(main.brand, osf.getBrand());
             main.brand.postDelayed(() -> {
                 setSpinnerSelection(main.type, osf.getType());
-                main.type.postDelayed(() -> setSpinnerSelection(main.subtype, osf.getSubType()), 200);
+                main.type.postDelayed(() -> {
+                    setSpinnerSelection(main.subtype, osf.getSubType());
+                    // The spinners walk through other catalogue rows on the way here, and
+                    // each step re-resolves the selection and lets go of the spool chosen.
+                    // Settling it again once they have stopped is what makes it stick.
+                    main.subtype.postDelayed(() -> settleSpoolmanSpool(local, spool), 300);
+                }, 200);
             }, 200);
 
             int grams = (int) Math.round(filament.optDouble("weight", 0));
@@ -2653,6 +2665,31 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
 
             showToast(getString(R.string.spool_selected, spool.optInt("id")), Toast.LENGTH_SHORT);
         } catch (Exception ignored) {}
+    }
+
+    /*
+     * Makes the chosen spool the selection, colour included. The spool names its own
+     * filament, so nothing is left to matching: the colour is read off it and shown, and
+     * the key is moved with it so that settling on it does not look like a fresh selection
+     * to be resolved again.
+     */
+    private void settleSpoolmanSpool(Filament local, JSONObject spool) {
+        JSONObject filament = spool.optJSONObject("filament");
+        if (filament == null) return;
+        MaterialID = local.filamentID;
+        pinnedForMaterialId = MaterialID;
+        pinnedSmFilamentId = filament.optInt("id");
+        spoolmanFilamentIds.put(MaterialID, filament.optInt("id"));
+        cachedSmFilament = filament;
+        cachedSmSpool = spool;
+        smMatchCertain = true;
+        MaterialColor = effectiveColour();
+        cachedFilamentKey = MaterialID + "|" + MaterialColor;
+        int colorInt = Color.parseColor("#" + MaterialColor);
+        main.colorview.setBackgroundColor(colorInt);
+        main.txtcolor.setText(MaterialColor);
+        main.txtcolor.setTextColor(getContrastColor(colorInt));
+        updateSpoolmanIndicators();
     }
 
     /*
