@@ -2060,9 +2060,10 @@ public class MainActivity extends AppCompatActivity implements NfcAdapter.Reader
             colorName = MaterialColor.substring(2);
         }
         // Spoolman's material is the material; the grade belongs in the filament's name.
-        // Named as Spoolman's own records are, so a filament created here reads the same
-        // as one entered there: "ELEGOO Rapid PLA+ Blue".
-        sdl.fName.setText(String.format("%s %s %s", sdl.vName.getText(), subtypeForSpoolman(), colorName).trim());
+        // The vendor does not: Spoolman holds it separately and renders "{vendor} {name}",
+        // so repeating it here reads back as "ELEGOO ELEGOO Rapid PLA+ Blue" and misses
+        // lookups. The name is the grade and the colour, as Spoolman's own records are.
+        sdl.fName.setText(String.format("%s %s", subtypeForSpoolman(), colorName).trim());
         String[] directions = new String[] {"coaxial", "longitudinal"};
         ArrayAdapter<String> adapter = new ArrayAdapter<>(context, android.R.layout.simple_dropdown_item_1line, directions);
         sdl.fMultiColorDirection.setAdapter(adapter);
